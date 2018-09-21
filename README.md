@@ -1,6 +1,6 @@
 ## Iot Project Fall 2018
 
-# Internet Connected Coffee Maker
+# Willy – Internet Connected Coffee Maker
 
 ## Project Description
 
