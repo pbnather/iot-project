@@ -5,32 +5,23 @@
  * Date: 17.11.18
  */
 
-// Powers the circuit.
-int relay = D1;
+int relay = D1; // Powers the circuit.
 
-// Senses the jug.
-int weight_sensor = A5;
+int weight_sensor = A5; // Senses the jug.
 
-// Physical binary switch.
-int liquid_sensor = D3;
+int liquid_sensor = D3; // Physical binary switch.
 
-// On-board LED.
-int led = D7;
+int led = D7; // On-board LED.
 
-// Physical binary switch.
-int button = D2;
+int button = D2;  // Physical binary switch.
 
-// For powering liquid and weight sensors.
-int power = A4;
+int power = A4; // For powering liquid and weight sensors.
 
-// Weight treshhold for sensing a jug.
-const int JUG_WEIGHT = 1000;
+const int JUG_WEIGHT = 1000;  // Weight treshhold for sensing a jug.
 
-// Weight measured by the `weight_sensor`.
-int weight;
+int weight; // Weight measured by the `weight_sensor`.
 
-// Property measured by the `liquid_sensor`.
-bool hasWater;
+bool hasWater;  // Property measured by the `liquid_sensor`.
 
 // Coffe machine internal state:
 // either `brewing` or `not brewing`.
