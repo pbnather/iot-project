@@ -5,6 +5,15 @@
  * Date: 17.11.18
  */
 
+#define JUG_WEIGHT 1000
+#define TOKEN_MAX_SIZE 255
+#define RFC3339Z_SIZE 21
+// addresses of data in EEPROM memory
+#define REFRESH_TK_ADDR 0
+#define REFRESH_TK_SIZE_ADDR 255
+#define ACCESS_TK_ADDR 256
+#define ACCESS_TK_SIZE_ADDR 511
+
 int relay = D1; // Powers the circuit.
 
 int weight_sensor = A5; // Senses the jug.
@@ -13,21 +22,21 @@ int liquid_sensor = D3; // Physical binary switch.
 
 int led = D7; // On-board LED.
 
+int weight_led;
+int liquid_led;
+int brewing_led;
+
 int button = D2;  // Physical binary switch.
 
 int power = A4; // For powering liquid and weight sensors.
-
-const int JUG_WEIGHT = 1000;  // Weight treshhold for sensing a jug.
 
 int weight; // Weight measured by the `weight_sensor`.
 
 bool hasWater;  // Property measured by the `liquid_sensor`.
 
-char device_code[255] = "";
+char access_token[TOKEN_MAX_SIZE] = "";
 
-char access_token[255] = "";
-
-char refresh_token[255] = "";
+char refresh_token[TOKEN_MAX_SIZE] = "";
 
 // Coffe machine internal state:
 // either `brewing` or `not brewing`.
@@ -51,16 +60,16 @@ void setup()
 
   // Get refresh token from EEPROM
   uint8_t refresh_token_size;
-  EEPROM.get(255, refresh_token_size);
-  EEPROM.get(0, refresh_token);
-  if(refresh_token_size < 255) refresh_token[refresh_token_size] = 0;
+  EEPROM.get(REFRESH_TK_SIZE_ADDR, refresh_token_size);
+  EEPROM.get(REFRESH_TK_ADDR, refresh_token);
+  if(refresh_token_size < TOKEN_MAX_SIZE) refresh_token[refresh_token_size] = 0;
   Serial.printf("EEPROM - Refresh token %s\nRefresh token size: %d\n", refresh_token, refresh_token_size);
 
   // Get access token from EEPROM
   uint8_t access_token_size;
-  EEPROM.get(511, access_token_size);
-  EEPROM.get(256, access_token);
-  if(access_token_size < 255) access_token[access_token_size] = 0;
+  EEPROM.get(ACCESS_TK_SIZE_ADDR, access_token_size);
+  EEPROM.get(ACCESS_TK_ADDR, access_token);
+  if(access_token_size < TOKEN_MAX_SIZE) access_token[access_token_size] = 0;
   Serial.printf("EEPROM - Access token %s\nAccess token size: %d\n", access_token, access_token_size);
 
   // Call `changeState` (ISR) on button toggle.
@@ -77,8 +86,8 @@ void setup()
   Particle.subscribe("refreshed-token", save_refreshed_token, MY_DEVICES);
 }
 
-Timer next_event_timer(10, refreshxd, true);
-Timer next_calendar_fetch(10, get_first_event, true);
+Timer next_event_timer(1, refreshxd, true);
+Timer next_calendar_fetch(11, get_first_event, true);
 
 void loop()
 {
@@ -86,8 +95,8 @@ void loop()
   // rfc3339Time();
   // delay(3000);
   // Read data from sensors.
-  weight = 2000;//analogRead(weight_sensor);
-  hasWater = true;//digitalRead(liquid_sensor);
+  weight = analogRead(weight_sensor);
+  hasWater = digitalRead(liquid_sensor);
 
   // Power the circuit if coffe machine:
   // - is in `brewing` mode
@@ -106,7 +115,7 @@ void loop()
 // Toggles `isBrewing` state.
 void changeState()
 {
-  // isBrewing = !isBrewing;
+  isBrewing = !isBrewing;
 }
 
 // Returns `true` if Willy has a jug in place
@@ -134,10 +143,15 @@ void get_first_event() {
 int get_days_first_event(String command)
 {
   Serial.printf("Get days first event webhook called.\n");
-  char data[255];
-  char now[21];
+  // char data[255];
+  char now[RFC3339Z_SIZE];
   rfc3339Time(now);
-  snprintf(data, sizeof(data), "{\"access_token\":\"%s\", \"time\":\"%s\"}", access_token, now);
+  String data = "{\"access_token\":\"";
+  data += access_token;
+  data += "\", \"time\":\"";
+  data += now;
+  data += "\"}";
+  // snprintf(data, sizeof(data), "{\"access_token\":\"%s\", \"time\":\"%s\"}", access_token, now);
   Serial.printf("%s\n", data);
   Particle.publish("getEvents", data, PRIVATE);
   return 1;
@@ -169,12 +183,13 @@ void authenticate(const char *event, const char *data) {
 
   Serial.printf("Authentication started:\n");
   String response = String(data);
-  char responseBuffer[255] = "";
+  char responseBuffer[TOKEN_MAX_SIZE] = "";
+  char device_code[TOKEN_MAX_SIZE];
   char delimeter[2] = "~";
   char* token;
-  response.toCharArray(responseBuffer, 255);
+  response.toCharArray(responseBuffer, TOKEN_MAX_SIZE);
   String tmp = strtok(responseBuffer, delimeter);
-  tmp.toCharArray(device_code, 255);
+  tmp.toCharArray(device_code, TOKEN_MAX_SIZE);
   Serial.printf("device_code: %s\n", device_code);
   token = strtok(NULL, delimeter);
   Serial.printf("user_code: %s\n", token);
@@ -202,22 +217,22 @@ void myHandler(const char *event, const char *data)
 {
   Serial.printf("Saving credentials started:\n");
   String response = String(data);
-  char responseBuffer[255] = "";
+  char responseBuffer[TOKEN_MAX_SIZE] = "";
   char delimeter[2] = "~";
   char* token;
-  response.toCharArray(responseBuffer, 255);
+  response.toCharArray(responseBuffer, TOKEN_MAX_SIZE);
   String tmp = strtok(responseBuffer, delimeter);
-  tmp.toCharArray(access_token, 255);
+  tmp.toCharArray(access_token, TOKEN_MAX_SIZE);
   Serial.printf("acces_token: %s\n", access_token);
-  EEPROM.put(256, access_token);
+  EEPROM.put(ACCESS_TK_ADDR, access_token);
   uint8_t access_token_size = strlen(access_token);
-  EEPROM.put(511, access_token_size);
+  EEPROM.put(ACCESS_TK_SIZE_ADDR, access_token_size);
   tmp = strtok(NULL, delimeter);
-  tmp.toCharArray(refresh_token, 255);
+  tmp.toCharArray(refresh_token, TOKEN_MAX_SIZE);
   Serial.printf("refresh_token: %s\n", refresh_token);
-  EEPROM.put(0, refresh_token);
+  EEPROM.put(REFRESH_TK_ADDR, refresh_token);
   uint8_t refresh_token_size = strlen(refresh_token);
-  EEPROM.put(255, refresh_token_size);
+  EEPROM.put(REFRESH_TK_SIZE_ADDR, refresh_token_size);
 }
 
 void mineHandler(const char *event, const char *data)
@@ -227,7 +242,7 @@ void mineHandler(const char *event, const char *data)
   String timestr = String(data);
   unsigned int time_to_brew = 0;
   int hour, min, sec, zone, day;
-  char now[21];
+  char now[RFC3339Z_SIZE];
   rfc3339Time(now);
   Serial.printf("Current time: %s\n", now);
   // parsing string data
@@ -288,7 +303,7 @@ void rfc3339Time(char* now)
   // 2018-12-11T11:30:00Z
   time_t time = Time.now();
   String timestr = Time.format(time, "%Y-%m-%dT%H:%M:%SZ");
-  timestr.toCharArray(now, 21);
+  timestr.toCharArray(now, RFC3339Z_SIZE);
   // strftime(buf, sizeof(16), "%Y-%m-%dT%H:%M:%SZ", info);
 }
 
@@ -296,9 +311,9 @@ void save_refreshed_token(const char *event, const char *data)
 {
   Serial.printf("Saving refreshed access token:\n");
   String response(data);
-  response.toCharArray(access_token, 255);
+  response.toCharArray(access_token, TOKEN_MAX_SIZE);
   uint8_t token_size = strlen(access_token);
-  EEPROM.put(511, token_size);
-  EEPROM.put(256, access_token);
+  EEPROM.put(ACCESS_TK_SIZE_ADDR, token_size);
+  EEPROM.put(ACCESS_TK_ADDR, access_token);
   Serial.printf("Access token: %s\n Access token size: %d\n", access_token, token_size);
 }
