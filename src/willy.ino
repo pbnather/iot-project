@@ -22,9 +22,11 @@ int liquid_sensor = D3; // Physical binary switch.
 
 int led = D7; // On-board LED.
 
-int weight_led;
-int liquid_led;
-int brewing_led;
+int weight_led = D1;
+
+int liquid_led = D4;
+
+int brewing_led = D5;
 
 int button = D2;  // Physical binary switch.
 
@@ -34,13 +36,13 @@ int weight; // Weight measured by the `weight_sensor`.
 
 bool hasWater;  // Property measured by the `liquid_sensor`.
 
-char access_token[TOKEN_MAX_SIZE] = "";
+char access_token[TOKEN_MAX_SIZE] = ""; // Access token needed for calling Google Calendar API (valid ~1h).
 
-char refresh_token[TOKEN_MAX_SIZE] = "";
+char refresh_token[TOKEN_MAX_SIZE] = "";  // Refresh token needed to get new access token.
 
 // Coffe machine internal state:
 // either `brewing` or `not brewing`.
-bool isBrewing = false;
+volatile bool isBrewing = false;
 
 // Run only once at the power on/reset.
 void setup()
@@ -52,7 +54,11 @@ void setup()
   pinMode(relay, OUTPUT);
   pinMode(power, OUTPUT);
   pinMode(led, OUTPUT);
+  pinMode(weight_led, OUTPUT);
+  pinMode(liquid_led, OUTPUT);
+  pinMode(brewing_led, OUTPUT);
 
+  // DEBUG ONLY
   Serial.begin(9600);
 
   // Set power to output HIGH voltage.
@@ -72,28 +78,25 @@ void setup()
   if(access_token_size < TOKEN_MAX_SIZE) access_token[access_token_size] = 0;
   Serial.printf("EEPROM - Access token %s\nAccess token size: %d\n", access_token, access_token_size);
 
-  // Call `changeState` (ISR) on button toggle.
-  // attachInterrupt(button, changeState, CHANGE);
+  // Call `changeState` (ISR) on button press.
+  attachInterrupt(button, change_state, RISING);
 
   // DEBUG ONLY
-  Particle.function("get_device_code", get_device_code);
-  Particle.function("get_days_first_event", get_days_first_event);
-  Particle.function("refresh_token", refresh_token_calendar);
+  Particle.function("get_device_code", get_device_code_fun);
+  Particle.function("get_days_first_event", get_days_first_event_fun);
+  Particle.function("refresh_access_token", refresh_access_token_fun);
   // Calendar API
-  Particle.subscribe("receive_device_code", authenticate, MY_DEVICES);
-  Particle.subscribe("CalendarAPI-token2", myHandler, MY_DEVICES);
-  Particle.subscribe("events-get-them", mineHandler, MY_DEVICES);
-  Particle.subscribe("refreshed-token", save_refreshed_token, MY_DEVICES);
+  Particle.subscribe("device_code_token", authenticate, MY_DEVICES);
+  Particle.subscribe("access_refresh_tokens", save_tokens, MY_DEVICES);
+  Particle.subscribe("days_first_event", set_first_event_timer, MY_DEVICES);
+  Particle.subscribe("new_access_token", save_refreshed_token, MY_DEVICES);
 }
 
-Timer next_event_timer(1, refreshxd, true);
-Timer next_calendar_fetch(11, get_first_event, true);
+Timer next_event_timer(1, change_state, true);
+Timer event_fetch_timer(11, get_days_first_event, true);
 
 void loop()
 {
-  delay(10000);
-  // rfc3339Time();
-  // delay(3000);
   // Read data from sensors.
   weight = analogRead(weight_sensor);
   hasWater = digitalRead(liquid_sensor);
@@ -102,7 +105,7 @@ void loop()
   // - is in `brewing` mode
   // - has a jug
   // - has water
-  if(isBrewing && hasJug() && hasWater) {
+  if(isBrewing && has_jug() && hasWater) {
     digitalWrite(relay, HIGH);
     digitalWrite(led,HIGH);
   } else {
@@ -113,7 +116,7 @@ void loop()
 
 // Interrupt Service Routine (ISR)
 // Toggles `isBrewing` state.
-void changeState()
+void change_state()
 {
   isBrewing = !isBrewing;
 }
@@ -121,29 +124,28 @@ void changeState()
 // Returns `true` if Willy has a jug in place
 // by comparing `weight` with `JUG_WEIGHT`;
 // returns false otherwise.
-bool hasJug()
+bool has_jug()
 {
   return weight >= JUG_WEIGHT;
 }
 
+// DEBUG ONLY
+int get_device_code_fun(String command) { get_device_code(); return 1; }
+int get_days_first_event_fun(String command) { get_days_first_event(); return 1; }
+int refresh_access_token_fun(String command) { refresh_access_token(); return 1; }
+
 // Start authentication process, request Google servers
 // for code for the user to approve calendar integration
 // at https://www.google.com/device
-int get_device_code(String command)
+void get_device_code()
 {
-  Serial.printf("Get device code webhook called.\n");
-  Particle.publish("get_device_code_google_calendar", NULL, PRIVATE);
-  return 1;
+  Serial.printf("get_device_code webhook called.\n");
+  Particle.publish("get_device_code", NULL, PRIVATE);
 }
 
-void get_first_event() {
-  get_days_first_event("test");
-}
-
-int get_days_first_event(String command)
+void get_days_first_event()
 {
-  Serial.printf("Get days first event webhook called.\n");
-  // char data[255];
+  Serial.printf("get_days_first_event webhook called.\n");
   char now[RFC3339Z_SIZE];
   rfc3339Time(now);
   String data = "{\"access_token\":\"";
@@ -151,47 +153,34 @@ int get_days_first_event(String command)
   data += "\", \"time\":\"";
   data += now;
   data += "\"}";
-  // snprintf(data, sizeof(data), "{\"access_token\":\"%s\", \"time\":\"%s\"}", access_token, now);
-  Serial.printf("%s\n", data);
-  Particle.publish("getEvents", data, PRIVATE);
-  return 1;
+  Particle.publish("get_events", data, PRIVATE);
 }
 
-int refresh_token_calendar(String command)
+void refresh_access_token()
 {
-  Serial.printf("Refresh token webhook called.\n");
-  Particle.publish("refresh-token-calendar-api", refresh_token, PRIVATE);
-  return 1;
-}
-
-void refreshxd() {
-  Serial.printf("Timer called\n");
-  digitalWrite(led,HIGH);
-  delay(500);
-  digitalWrite(led,LOW);
-  delay(500);
-  // refresh_token_calendar("test");
-  get_first_event();
+  Serial.printf("refresh_access_token webhook called.\n");
+  Particle.publish("refresh_access_token", refresh_token, PRIVATE);
 }
 
 void authenticate(const char *event, const char *data) {
-  // "device_code": "AH-1Ng2cbcdTaeFUCzgny_srzOR8j3Wh1S0M_c8q8CmviTS6GGNFTY-wljyNj3XPrTfUeBW_8ft8Weqw0eMAi1tHtoxXmoXXtA",
-  // "user_code": "ZMYD-DFDJ",
+  // json data template:
+  // "device_code": device_code,
+  // "user_code": user_code,
   // "expires_in": 1800,
   // "interval": 5,
   // "verification_url": "https://www.google.com/device"
 
-  Serial.printf("Authentication started:\n");
+  Serial.printf("Authenticating:\n");
   String response = String(data);
-  char responseBuffer[TOKEN_MAX_SIZE] = "";
+  char responseBuffer[TOKEN_MAX_SIZE];
   char device_code[TOKEN_MAX_SIZE];
   char delimeter[2] = "~";
   char* token;
   response.toCharArray(responseBuffer, TOKEN_MAX_SIZE);
   String tmp = strtok(responseBuffer, delimeter);
   tmp.toCharArray(device_code, TOKEN_MAX_SIZE);
-  Serial.printf("device_code: %s\n", device_code);
   token = strtok(NULL, delimeter);
+  Serial.printf("device_code: %s\n", device_code);
   Serial.printf("user_code: %s\n", token);
   int i;
   // TODO: make while loop and try to request every interval
@@ -203,49 +192,45 @@ void authenticate(const char *event, const char *data) {
     delay(500);
   }
 
-  // String userCode = strtok(NULL, delimeter);
-  // Serial.printf("%s\n", userCode);
-  // int expiresIn = atoi(strtok(NULL, delimeter));
-  // Serial.printf("%d\n", expiresIn);
-  // int interval = atoi(strtok(NULL, delimeter));
-  // Serial.printf("%d\n", interval);
-  // Trigger the integration
-  Particle.publish("CalendarAPI-get-token2", device_code, PRIVATE);
+  Particle.publish("get_access_refresh_tokens", device_code, PRIVATE);
 }
 
-void myHandler(const char *event, const char *data)
+void save_tokens(const char *event, const char *data)
 {
-  Serial.printf("Saving credentials started:\n");
+  Serial.printf("Saving tokens:\n");
   String response = String(data);
   char responseBuffer[TOKEN_MAX_SIZE] = "";
   char delimeter[2] = "~";
-  char* token;
   response.toCharArray(responseBuffer, TOKEN_MAX_SIZE);
+
+  // Get access and refresh token.
   String tmp = strtok(responseBuffer, delimeter);
   tmp.toCharArray(access_token, TOKEN_MAX_SIZE);
-  Serial.printf("acces_token: %s\n", access_token);
-  EEPROM.put(ACCESS_TK_ADDR, access_token);
-  uint8_t access_token_size = strlen(access_token);
-  EEPROM.put(ACCESS_TK_SIZE_ADDR, access_token_size);
   tmp = strtok(NULL, delimeter);
   tmp.toCharArray(refresh_token, TOKEN_MAX_SIZE);
-  Serial.printf("refresh_token: %s\n", refresh_token);
-  EEPROM.put(REFRESH_TK_ADDR, refresh_token);
+
+  // Get tokens sizes.
+  uint8_t access_token_size = strlen(access_token);
   uint8_t refresh_token_size = strlen(refresh_token);
+
+  // Save tokens to EEPROM memory.
+  EEPROM.put(REFRESH_TK_ADDR, refresh_token);
   EEPROM.put(REFRESH_TK_SIZE_ADDR, refresh_token_size);
+  EEPROM.put(ACCESS_TK_ADDR, access_token);
+  EEPROM.put(ACCESS_TK_SIZE_ADDR, access_token_size);
+
+  // DEBUG ONLY
+  Serial.printf("acces_token: %s\n", access_token);
+  Serial.printf("refresh_token: %s\n", refresh_token);
 }
 
-void mineHandler(const char *event, const char *data)
+void set_first_event_timer(const char *event, const char *data)
 {
-  Serial.printf("Getting first event in the day:\n");
-  Serial.printf("%s\n", data);
+  Serial.printf("Setting timer for first event in the day:\n");
   String timestr = String(data);
   unsigned int time_to_brew = 0;
   int hour, min, sec, zone, day;
-  char now[RFC3339Z_SIZE];
-  rfc3339Time(now);
-  Serial.printf("Current time: %s\n", now);
-  // parsing string data
+  // Parse event time.
   hour = data[12] - '0';
   if(data[11] != '0') hour += 10 * (data[11]-'0');
   min = data[15] - '0';
@@ -283,28 +268,18 @@ void mineHandler(const char *event, const char *data)
   hour -= cur_hour;
 
   Serial.printf("Time to event: %d:%d:%d\n", hour, min, sec);
-  if(hour >= 1) hour -= 1;
-  Serial.printf("Time to brew: %d:%d:%d\n", hour, min, sec);
-  time_to_brew += hour*3600000;
-  time_to_brew += min*60000;
-  time_to_brew += sec*1000;
-  if(hour >= 0) {
+  // Set up brewing one hour before event starts.
+  if(hour >= 1) {
+    hour -= 1;
+    Serial.printf("Time to brew: %d:%d:%d\n", hour, min, sec);
+    time_to_brew += hour*3600000;
+    time_to_brew += min*60000;
+    time_to_brew += sec*1000;
     Serial.printf("In millis to event: %u\n", time_to_brew);
     next_event_timer.changePeriod(time_to_brew);
   } else {
     Serial.printf("Too late, next time brew faster...");
   }
-}
-
-void rfc3339Time(char* now)
-{
-  //            11 14 17 20
-  // 2018-12-11T23:30:00+01:00
-  // 2018-12-11T11:30:00Z
-  time_t time = Time.now();
-  String timestr = Time.format(time, "%Y-%m-%dT%H:%M:%SZ");
-  timestr.toCharArray(now, RFC3339Z_SIZE);
-  // strftime(buf, sizeof(16), "%Y-%m-%dT%H:%M:%SZ", info);
 }
 
 void save_refreshed_token(const char *event, const char *data)
@@ -316,4 +291,13 @@ void save_refreshed_token(const char *event, const char *data)
   EEPROM.put(ACCESS_TK_SIZE_ADDR, token_size);
   EEPROM.put(ACCESS_TK_ADDR, access_token);
   Serial.printf("Access token: %s\n Access token size: %d\n", access_token, token_size);
+}
+
+void rfc3339Time(char* now)
+{
+  // RFC3339 date example
+  // 2018-12-11T11:30:00Z
+  time_t time = Time.now();
+  String timestr = Time.format(time, "%Y-%m-%dT%H:%M:%SZ");
+  timestr.toCharArray(now, RFC3339Z_SIZE);
 }
