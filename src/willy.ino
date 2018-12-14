@@ -157,6 +157,7 @@ int print_info_fun(String command)
   Serial.printf("has_jug: %d\n", has_jug());
   Serial.printf("weight: %d\n", weight);
   Serial.printf("Timer is active: %d\n", stop_brewing_timer.isActive());
+  Serial.printf("Time: %d\n", Time.hour());
   return 1;
 }
 
@@ -196,7 +197,7 @@ bool has_jug()
 bool should_fetch_event()
 {
   if(!hasPendingEvent) {
-    if(MIN_TIME <= Time.hour() < MAX_TIME) {
+    if(MIN_TIME <= Time.hour() && Time.hour() < MAX_TIME) {
       return true;
     }
   }
@@ -207,7 +208,7 @@ void set_fetch_event_timer() {
   // Call Particle process for safety
   Particle.process();
   if(!hasPendingEvent) {
-    if(MIN_TIME <= Time.hour() < MAX_TIME) {
+    if(MIN_TIME <= Time.hour() && Time.hour() < MAX_TIME) {
       Serial.printf("Fetching events started.");
       event_fetch_timer.changePeriod(1000);
     } else {
@@ -274,7 +275,6 @@ void authenticate(const char *event, const char *data) {
   Serial.printf("user_code: %s\n", token);
   Particle.process();
   int i;
-  // TODO: make while loop and try to request every interval
   for(i=0; i<60; i++) {
     Serial.printf("counting %d/60\n", i);
     if(i % 9 == 0) Particle.process();
@@ -319,10 +319,8 @@ void save_tokens(const char *event, const char *data)
   Serial.printf("refresh_token: %s\n", refresh_token);
 
   if(should_fetch_event()) {
-    Serial.printf("Test1\n");
     get_days_first_event();
   } else {
-    Serial.printf("Test2\n");
     set_fetch_event_timer();
   }
 }
