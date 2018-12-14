@@ -25,11 +25,9 @@ int liquid_sensor = D3; // Physical binary switch.
 
 int led = D7; // On-board LED.
 
-int weight_led = D0;
+int weight_led = D0;  // Signals if there is a jug.
 
-int liquid_led = D1;
-
-int brewing_led = D2;
+int liquid_led = D1;  // Signals if there is enough water.
 
 int button = D5;  // Physical binary switch.
 
@@ -44,8 +42,8 @@ char refresh_token[TOKEN_MAX_SIZE] = "notset";  // Refresh token needed to get n
 volatile bool isBrewing = false; // Brewing was initiated.
 volatile bool isFinishing = false; // Brewing is finishing.
 volatile bool isStarted = false;  // Willy is brewing.
-volatile bool hasPendingEvent = false;  // timer is set to trigger one hour before next event
-volatile bool shouldRefresh = true;
+volatile bool hasPendingEvent = false;  // Timer is set to trigger one hour before next event.
+volatile bool shouldRefresh = true; // Refresh access token.
 
 Timer next_event_timer(1000, execute_event, true);
 Timer event_fetch_timer(1000, set_refresh, true);
@@ -62,19 +60,18 @@ void setup()
   pinMode(led, OUTPUT);
   pinMode(weight_led, OUTPUT);
   pinMode(liquid_led, OUTPUT);
-  pinMode(brewing_led, OUTPUT);
 
-  // For printing useful info
+  // For printing useful info/debugging.
   Serial.begin(9600);
 
-  // Get refresh token from EEPROM
+  // Get refresh token from EEPROM.
   uint8_t refresh_token_size;
   EEPROM.get(REFRESH_TK_SIZE_ADDR, refresh_token_size);
   EEPROM.get(REFRESH_TK_ADDR, refresh_token);
   if(refresh_token_size < TOKEN_MAX_SIZE) refresh_token[refresh_token_size] = 0;
   Serial.printf("EEPROM - Refresh token %s\nRefresh token size: %d\n", refresh_token, refresh_token_size);
 
-  // Get access token from EEPROM
+  // Get access token from EEPROM.
   uint8_t access_token_size;
   EEPROM.get(ACCESS_TK_SIZE_ADDR, access_token_size);
   EEPROM.get(ACCESS_TK_ADDR, access_token);
@@ -84,7 +81,7 @@ void setup()
   // Call `changeState` (ISR) on button press.
   attachInterrupt(button, change_state, RISING);
 
-  // For controlling WIlly through Particle console
+  // For controlling WIlly through Particle console.
   Particle.function("print_info", print_info_fun);
   Particle.function("get_device_code", get_device_code_fun);
   Particle.function("get_days_first_event", get_days_first_event_fun);
@@ -108,7 +105,7 @@ void loop()
 
   // Light led if needed.
   if(has_jug()) {
-    digitalWrite(brewing_led, HIGH);
+    digitalWrite(weight_led, HIGH);
   } else {
     digitalWrite(weight_led, LOW);
   }
@@ -118,7 +115,7 @@ void loop()
     digitalWrite(liquid_led, HIGH);
   }
   // When started brewing but stopped sensing water
-  // brew for 100 seconds to finish water in the tank.
+  // brew for two minutes to finish water in the tank.
   if(isStarted) {
     digitalWrite(relay, HIGH);
     digitalWrite(led,HIGH);
@@ -156,8 +153,6 @@ int print_info_fun(String command)
   Serial.printf("hasWater: %d\n", !noWater);
   Serial.printf("has_jug: %d\n", has_jug());
   Serial.printf("weight: %d\n", weight);
-  Serial.printf("Timer is active: %d\n", stop_brewing_timer.isActive());
-  Serial.printf("Time: %d\n", Time.hour());
   return 1;
 }
 
@@ -205,7 +200,7 @@ bool should_fetch_event()
 }
 
 void set_fetch_event_timer() {
-  // Call Particle process for safety
+  // Call Particle process for safety.
   Particle.process();
   if(!hasPendingEvent) {
     if(MIN_TIME <= Time.hour() && Time.hour() < MAX_TIME) {
@@ -274,6 +269,7 @@ void authenticate(const char *event, const char *data) {
   Serial.printf("device_code: %s\n", device_code);
   Serial.printf("user_code: %s\n", token);
   Particle.process();
+  Particle.publish("new_user_code", token, PRIVATE);
   int i;
   for(i=0; i<60; i++) {
     Serial.printf("counting %d/60\n", i);
@@ -305,7 +301,7 @@ void save_tokens(const char *event, const char *data)
   uint8_t access_token_size = strlen(access_token);
   uint8_t refresh_token_size = strlen(refresh_token);
 
-  // Call Particle process for safety
+  // Call Particle process for safety.
   Particle.process();
 
   // Save tokens to EEPROM memory.
@@ -363,7 +359,7 @@ void set_first_event_timer(const char *event, const char *data)
     hour -= 1;
   }
 
-  // Call Particle process for safety
+  // Call Particle process for safety.
   Particle.process();
 
   if(hour < cur_hour) hour += 24;
@@ -393,7 +389,7 @@ void save_refreshed_token(const char *event, const char *data)
   uint8_t token_size = strlen(access_token);
   EEPROM.put(ACCESS_TK_SIZE_ADDR, token_size);
   EEPROM.put(ACCESS_TK_ADDR, access_token);
-  Serial.printf("Access token: %s\n Access token size: %d\n", access_token, token_size);
+  Serial.printf("Access token: %s\nAccess token size: %d\n", access_token, token_size);
   // Call Particle process for safety
   Particle.process();
   if(should_fetch_event()) {
